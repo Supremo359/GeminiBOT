@@ -5,7 +5,21 @@ import os
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from flask import Flask
+import threading
 
+web_app = Flask('')
+
+@web_app.route('/')
+def home():
+    str_status = "Bot is active 24/7!"
+    return str_status
+
+def run_flask():
+    web_app.run(host='0.0.0.0', port=10000)
+
+# Стартираме уеб сървъра в отделна нишка, за да не спира Telegram бота
+threading.Thread(target=run_flask).start()
 TELEGRAM_TOKEN = '8979676242:AAFnklHvOFOwBTjxVmNuEkUNSxy07oBLxPw'
 CHANNEL_ID = '@gemiNiPredicts'
 FOOTBALL_API_KEY = '4ce672bbabmsh72b2c149a57ff6bp1d83f9jsn2024693a1a84'
