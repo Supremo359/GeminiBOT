@@ -381,7 +381,11 @@ async def post_init(app):
 
 if __name__ == '__main__':
     print("🤖 Ботът е стартиран с филтър за топ първенства и активни пазари...")
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # Добавяме job_queue ръчно след build, за да няма конфликти
+    job_queue = app.job_queue
+    job_queue.run_repeating(hourly_reminder, interval=3600, first=5)
     
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("stats", start_handler))
