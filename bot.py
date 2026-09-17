@@ -20,6 +20,7 @@ def run_flask():
 
 # Стартираме уеб сървъра в отделна нишка, за да не спира Telegram бота
 threading.Thread(target=run_flask).start()
+
 TELEGRAM_TOKEN = '8979676242:AAFnklHvOFOwBTjxVmNuEkUNSxy07oBLxPw'
 CHANNEL_ID = '@gemiNiPredicts'
 FOOTBALL_API_KEY = '4ce672bbabmsh72b2c149a57ff6bp1d83f9jsn2024693a1a84'
@@ -28,6 +29,22 @@ BOT_USERNAME = "Geminipredict_bot"
 ADMIN_TELEGRAM_ID = 8173401789
 HISTORY_FILE = "posted_matches.json"
 last_reminder_msg_id = None
+
+# --- ТОП ЛИГИ С ГАРАНТИРАНИ ПАЗАРИ В БУКМЕЙКЪРИТЕ ---
+# Включваме Шампионска лига, топ 5 първенствата, както и българската efbet Лига
+TOP_LEAGUE_IDS = [
+    39,   # Premier League (England)
+    140,  # La Liga (Spain)
+    135,  # Serie A (Italy)
+    78,   # Bundesliga (Germany)
+    61,   # Ligue 1 (France)
+    2,    # UEFA Champions League
+    3,    # UEFA Europa League
+    848,  # UEFA Conference League
+    172,  # efbet League (Bulgaria)
+    88,   # Eredivisie (Netherlands)
+    94,   # Primeira Liga (Portugal)
+]
 
 # --- РАБОТА С АРХИВА (JSON) ---
 def load_history():
@@ -54,22 +71,42 @@ def save_to_history(fixture_id, home, away, league, bet_name, check_type):
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
-# --- ИЗВЛИЧАНЕ НА МАЧОВЕ ---
+# --- ИЗВЛИЧАНЕ НА МАЧОВЕ С ФИЛТЪР ЗА ТОП ЛИГИ ---
 def get_upcoming_matches(limit=3):
     url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
     headers = {"X-RapidAPI-Key": FOOTBALL_API_KEY, "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"}
     today_str = datetime.now().strftime('%Y-%m-%d')
     
+    selected_matches = []
+    
     try:
+        # 1. Първо опитваме да намерим мачове от топ лигите за днес
         res = requests.get(url, headers=headers, params={"date": today_str, "status": "NS"}).json()
-        matches = res.get('response', [])
+        all_matches = res.get('response', [])
         
-        if len(matches) < limit:
+        # Филтрираме само тези, които са в нашия списък с надеждни лиги
+        top_matches = [m for m in all_matches if m['league']['id'] in TOP_LEAGUE_IDS]
+        selected_matches.extend(top_matches)
+        
+        # 2. Ако няма достатъчно в топ лигите за днес, проверяваме утрешния ден в топ лигите
+        if len(selected_matches) < limit:
             tomorrow_str = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
             res_tom = requests.get(url, headers=headers, params={"date": tomorrow_str, "status": "NS"}).json()
-            matches.extend(res_tom.get('response', []))
+            all_tom_matches = res_tom.get('response', [])
+            top_tom_matches = [m for m in all_tom_matches if m['league']['id'] in TOP_LEAGUE_IDS]
+            selected_matches.extend(top_tom_matches)
+            
+        # 3. Абсолютен резервен вариант: ако дори в топ лигите няма свободни, пускаме от другите, но избягваме юноши/приятелски
+        if len(selected_matches) < limit:
+            for m in all_matches:
+                if m not in selected_matches:
+                    league_name = m['league']['name'].lower()
+                    if 'u17' not in league_name and 'u19' not in league_name and 'friendly' not in league_name:
+                        selected_matches.append(m)
+                if len(selected_matches) >= limit:
+                    break
 
-        return matches[:limit]
+        return selected_matches[:limit]
     except Exception as e:
         print(f"Грешка при извличане на мачове: {e}")
         return []
@@ -127,7 +164,6 @@ def get_real_correct_score(fixture_id):
                     if bet.get('name') in ['Exact Score', 'Correct Score']:
                         values = bet.get('values', [])
                         if values:
-                            # Вземаме точния резултат с оптимално съотношение риск/коефициент (между 6.00 и 12.00)
                             filtered = [v for v in values if 6.0 <= float(v['odd']) <= 12.0]
                             target = filtered[0] if filtered else values[0]
                             return target['value'], target['odd']
@@ -195,20 +231,20 @@ async def publish_3_matches(bot):
         
     return True
 
-# --- АДМИН КОМАНДА: МОМЕНТАЛНО ПУСКА НЕ МОВЕЧЕ ОТ 3 МАТЧА ---
+# --- АДМИН КОМАНДА: МОМЕНТАЛНО ПУСКА 3 МАТЧА ---
 async def post_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_TELEGRAM_ID:
         await update.message.reply_text("⛔ *Нямате администраторски права за тази команда!*", parse_mode='Markdown')
         return
 
-    await update.message.reply_text("👑 *Пускам 3-те анализирани мача в канала веднага...*", parse_mode='Markdown')
+    await update.message.reply_text("👑 *Търся топ мачове с активни пазари и ги пускам в канала...*", parse_mode='Markdown')
     success = await publish_3_matches(context.bot)
     
     if success:
         await update.message.reply_text("✅ *Прогнозите бяха успешно качени и записани в архива!*", parse_mode='Markdown')
     else:
-        await update.message.reply_text("❌ *Грешка: Не бяха намерени подходящи предстоящи мачове.*", parse_mode='Markdown')
+        await update.message.reply_text("❌ *Грешка: Не бяха намерени подходящи мачове.*", parse_mode='Markdown')
 
 # --- АВТОМАТИЧНА ПРОВЕРКА И ВЕРИФИКАЦИЯ НА АРХИВА ---
 def get_past_stats_with_details():
@@ -239,7 +275,6 @@ def get_past_stats_with_details():
                     total += 1
                     check_type = item.get('check_type', 'over2.5')
                     
-                    # Изчисление на резултата според вида залог
                     is_win = False
                     if check_type == 'home' and home_g > away_g:
                         is_win = True
@@ -299,7 +334,6 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=user_id, text="❌ В момента няма намерени подходящи мачове.")
         return
 
-    # По подразбиране показва архива и статистиката
     await context.bot.send_message(chat_id=user_id, text="⏳ *Свързване с API и извличане на архива...*", parse_mode='Markdown')
     total, won, lost, win_rate, units, history = get_past_stats_with_details()
     matches_text = "\n".join(history) if history else "Все още няма завършили публикувани мачове."
@@ -346,7 +380,7 @@ async def post_init(app):
     job_queue.run_repeating(hourly_reminder, interval=3600, first=5)
 
 if __name__ == '__main__':
-    print("🤖 Ботът е стартиран с Максимален AI Анализ (500+ фактора)...")
+    print("🤖 Ботът е стартиран с филтър за топ първенства и активни пазари...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     app.add_handler(CommandHandler("start", start_handler))
