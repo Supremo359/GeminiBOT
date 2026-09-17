@@ -379,20 +379,22 @@ async def post_init(app):
     job_queue = app.job_queue
     job_queue.run_repeating(hourly_reminder, interval=3600, first=5)
 
-from telegram.ext import Updater, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler
 
 if __name__ == '__main__':
     print("🤖 Ботът е стартиран с филтър за топ първенства и активни пазари...")
     
-    # Използваме директно Updater за пълна стабилност
-    updater = Updater(TELEGRAM_TOKEN)
-    dispatcher = updater.dispatcher
+    # Инициализация по съвременния стандарт за версия 20+
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # Регистрация на командите
+    app.add_handler(CommandHandler("start", start_handler))
+    app.add_handler(CommandHandler("stats", start_handler))
+    app.add_handler(CommandHandler("post_now", post_now_command))
 
-    # Добавям командите
-    dispatcher.add_handler(CommandHandler("start", start_handler))
-    dispatcher.add_handler(CommandHandler("stats", start_handler))
-    dispatcher.add_handler(CommandHandler("post_now", post_now_command))
+    # Безопасно добавяне на периодична задача (job queue), ако се използва
+    if hasattr(app, "job_queue") and app.job_queue:
+        app.job_queue.run_repeating(hourly_reminder, interval=3600, first=5)
 
-    # Стартираме бота
-    updater.start_polling()
-    updater.idle()
+    # Стартиране на бота
+    app.run_polling(drop_pending_updates=True)
